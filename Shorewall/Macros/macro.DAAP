@@ -1,0 +1,13 @@
+#
+# Shorewall - DAAP Macro
+#
+# /usr/share/shorewall/macro.DAAP
+#
+#	This macro handles DAAP (Digital Audio Access Protocol) traffic.
+#	The protocol is used by iTunes, Rythmbox and other similar daemons.
+#
+###############################################################################
+#ACTION	SOURCE	DEST	PROTO	DEST	SOURCE	ORIGIN	RATE	USER/
+#				PORT(S)	PORT(S)	DEST	LIMIT	GROUP
+PARAM	-	-	tcp	3689
+PARAM	-	-	udp	3689

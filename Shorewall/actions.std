@@ -1,0 +1,50 @@
+#
+# Shorewall version 5 - Actions.std File
+#
+# /usr/share/shorewall/actions.std
+#
+#	Please see http://shorewall.net/Actions.html for additional
+#	information.
+#
+# Builtin Actions are:
+#
+#    A_ACCEPT           # Audits then accepts a connection request
+#    A_DROP             # Audits then drops a connection request
+#    A_REJECT		# Audits then drops a connection request
+#    allowBcast		# Silently Allow Broadcast/multicast
+#    dropBcast		# Silently Drop Broadcast/multicast
+#    dropNotSyn		# Silently Drop Non-syn TCP packets
+#    rejNotSyn		# Silently Reject Non-syn TCP packets
+#    allowoutUPnP	# Allow traffic from local command 'upnpd' (does not
+#                       # work with kernel 2.6.14 and later).
+#    allowinUPnP	# Allow UPnP inbound (to firewall) traffic
+#    forwardUPnP	# Allow traffic that upnpd has redirected from
+#			# 'upnp' interfaces.
+#    Limit              # Limit the rate of connections from each individual
+#                       # IP address
+#
+###############################################################################
+#ACTION
+A_Drop 		                # Audited Default Action for DROP policy
+A_Reject	                # Audited Default action for REJECT policy
+allowInvalid inline		# Accepts packets in the INVALID conntrack state
+AutoBL       noinline           # Auto-blacklist IPs that exceed thesholds
+AutoBLL      noinline           # Helper for AutoBL
+Broadcast    noinline           # Handles Broadcast/Multicast/Anycast
+DNSAmp                          # Matches one-question recursive DNS queries
+Drop		                # Default Action for DROP policy
+dropInvalid  inline		# Drops packets in the INVALID conntrack state
+DropSmurfs   noinline           # Drop smurf packets
+Established  inline		# Handles packets in the ESTABLISHED state
+GlusterFS    inline		# Handles GlusterFS
+IfEvent      noinline           # Perform an action based on an event
+Invalid      inline             # Handles packets in the INVALID conntrack state
+New	     inline             # Handles packets in the NEW conntrack state
+NotSyn       inline             # Handles TCP packets which do not have SYN=1 and ACK=0
+Reject                          # Default Action for REJECT policy
+Related      inline             # Handles packets in the RELATED conntrack state
+ResetEvent   inline		# Reset an Event
+RST	     inline             # Handle packets with RST set
+SetEvent     inline		# Initialize an event
+TCPFlags    			# Handle bad flag combinations.
+Untracked    inline             # Handles packets in the UNTRACKED conntrack state

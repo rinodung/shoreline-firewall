@@ -1,0 +1,10 @@
+#
+# Shorewall6 -- /etc/shorewall6/start
+#
+# Add commands below that you want to be executed after shorewall6 has
+# been started or restarted.
+#
+# See http://shorewall.net/shorewall_extension_scripts.htm for additional
+# information.
+#
+###############################################################################

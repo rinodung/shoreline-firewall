@@ -1,0 +1,40 @@
+#
+# Shorewall6 version 5 - Actions.std File
+#
+# /usr/share/shorewall6/actions.std
+#
+#	Please see http://shorewall.net/Actions.html for additional
+#	information.
+#
+# Builtin Actions are:
+#
+#    allowBcasts        # Accept multicast and anycast packets
+#    dropBcasts         # Silently Drop multicast and anycast packets
+#    dropNotSyn		# Silently Drop Non-syn TCP packets
+#    rejNotSyn		# Silently Reject Non-syn TCP packets
+#
+###############################################################################
+#ACTION
+A_Drop	                        # Audited Default Action for DROP policy
+A_Reject	                # Audited Default Action for REJECT policy
+A_AllowICMPs	                # Audited Accept needed ICMP6 types
+AllowICMPs   	                # Accept needed ICMP6 types
+allowInvalid inline		# Accepts packets in the INVALID conntrack state
+AutoBL       noinline           # Auto-blacklist IPs that exceed thesholds
+AutoBLL      noinline           # Helper for AutoBL
+Broadcast    noinline      	# Handles Broadcast/Multicast/Anycast
+Drop		        	# Default Action for DROP policy
+dropInvalid  inline		# Drops packets in the INVALID conntrack state
+DropSmurfs   noinline     	# Handles packets with a broadcast source address
+Established  inline		# Handles packets in the ESTABLISHED state
+IfEvent      noinline           # Perform an action based on an event
+Invalid	     inline		# Handles packets in the INVALID conntrack state
+New	     inline             # Handles packets in the NEW conntrack state
+NotSyn	     inline 		# Handles TCP packets that do not have SYN=1 and ACK=0
+Reject		        	# Default Action for REJECT policy
+Related      inline             # Handles packets in the RELATED conntrack state
+ResetEvent   inline		# Reset an Event
+RST	     inline             # Handle packets with RST set
+SetEvent     inline		# Initialize an event
+TCPFlags    			# Handles bad flags combinations
+Untracked    inline             # Handles packets in the UNTRACKED conntrack state

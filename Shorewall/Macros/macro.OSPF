@@ -1,0 +1,11 @@
+#
+# Shorewall - OSPF Macro
+#
+# /usr/share/shorewall/macro.OSPF
+#
+#	This macro handles OSPF multicast traffic
+#
+###############################################################################
+#ACTION	SOURCE	DEST	PROTO	DEST	SOURCE	ORIGIN	RATE	USER/
+#				PORT(S)	PORT(S)	DEST	LIMIT	GROUP
+PARAM	-	-	89	# OSPF

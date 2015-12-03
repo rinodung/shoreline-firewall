@@ -1,0 +1,11 @@
+#
+# Shorewall - Squid Macro
+#
+# /usr/share/shorewall/macro.Squid
+#
+#	This macro handles Squid web proxy traffic
+#
+###############################################################################
+#ACTION	SOURCE	DEST	PROTO	DEST	SOURCE	ORIGIN	RATE	USER/
+#				PORT(S)	PORT(S)	DEST	LIMIT	GROUP
+PARAM	-	-	tcp	3128

@@ -1,0 +1,9 @@
+#
+# Shorewall6 -- /etc/shorewall6/providers
+#
+# For information about entries in this file, type "man shorewall6-providers"
+#
+# For additional information, see http://shorewall.net/MultiISP.html
+#
+############################################################################################
+#NAME	NUMBER	MARK	DUPLICATE	INTERFACE	GATEWAY		OPTIONS		COPY

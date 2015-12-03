@@ -1,0 +1,1697 @@
+#
+# Shorewall 5.0 -- /usr/share/shorewall/lib.cli-std.
+#
+#     (c) 1999-2015 - Tom Eastep (teastep@shorewall.net)
+#
+#	Complete documentation is available at http://shorewall.net
+#
+#       This program is part of Shorewall.
+#
+#	This program is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by the
+#       Free Software Foundation, either version 2 of the license or, at your
+#       option, any later version.
+#
+#	This program is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with this program; if not, see <http://www.gnu.org/licenses/>.
+#
+# This library contains the command processing code common to /sbin/shorewall and /sbin/shorewall6.
+#
+####################################################################################################
+# Set the configuration variables from the .conf file
+#
+#     $1 = Yes: read the params file
+#     $2 = Yes: check for STARTUP_ENABLED
+#     $3 = Yes: Check for LOGFILE
+#
+get_config() {
+    local prog
+    local lib
+
+    ensure_config_path
+
+    if [ "$1" = Yes ]; then
+	if [ "$(id -u)" -eq 0 ]; then 
+	    params=$(find_file params)
+	else
+	    params="$g_shorewalldir/params"
+	fi
+
+	if [ -f $params ]; then
+	    . $params
+	fi
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+	config=$(find_file $g_program.conf)
+    else
+	[ -n "$g_shorewalldir" ] || fatal_error "Ordinary users may not $COMMAND the $CONFDIR/$g_program configuration"
+	config="$g_shorewalldir/$g_program.conf"
+    fi
+
+    if [ -f $config ]; then
+	if [ -r $config ]; then
+	    . $config
+	else
+	    fatal_error "Cannot read $config! (Hint: Are you root?)"
+	fi
+    else
+	fatal_error "$config does not exist!"
+    fi
+
+    ensure_config_path
+
+    if [ -z "$g_export" -a "$(id -u)" = 0 ]; then
+	#
+	# This block is avoided for compile for export and when the user isn't root
+	#
+	if [ "$3" = Yes ]; then
+	    setup_logread
+	fi
+
+	if [ $g_family -eq 4 ]; then
+	    if [ -n "$IPTABLES" ]; then
+		if [ ! -x "$IPTABLES" ]; then
+		    fatal_error "The program specified in IPTABLES does not exist or is not executable"
+		fi
+	    else
+		IPTABLES=$(mywhich iptables 2> /dev/null)
+		if [ -z "$IPTABLES" ] ; then
+		    fatal_error "Can't find iptables executable"
+		fi
+	    fi
+
+	    g_tool=$IPTABLES
+	else
+	    if [ -n "$IP6TABLES" ]; then
+		if [ ! -x "$IP6TABLES" ]; then
+		    fatal_error "The program specified in IP6TABLES does not exist or is not executable"
+		fi
+	    else
+		IP6TABLES=$(mywhich ip6tables 2> /dev/null)
+		if [ -z "$IP6TABLES" ] ; then
+		    fatal_error "Can't find ip6tables executable"
+		fi
+	    fi
+
+	    g_tool=$IP6TABLES
+	fi
+
+	if [ -n "$IPSET" ]; then
+	    case "$IPSET" in
+		*/*)
+		    if [ ! -x "$IPSET" ] ; then
+			fatal_error "The program specified in IPSET ($IPSET) does not exist or is not executable"
+		    fi
+		    ;;
+		ipset)
+		    #
+		    # Old config files had this as default
+		    #
+		    IPSET=''
+		    ;;
+		*)
+		    prog="$(mywhich $IPSET 2> /dev/null)"
+		    if [ -z "$prog" ] ; then
+			fatal_error "Can't find $IPSET executable"
+		    fi
+		    IPSET=$prog
+		    ;;
+	    esac
+	else
+	    IPSET=''
+	fi
+
+	if [ -n "$TC" ]; then
+	    case "$TC" in
+		*/*)
+		    if [ ! -x "$TC" ] ; then
+			fatal_error "The program specified in TC ($TC) does not exist or is not executable"
+		    fi
+		    ;;
+		*)
+		    prog="$(mywhich $TC 2> /dev/null)"
+		    if [ -z "$prog" ] ; then
+			fatal_error "Can't find $TC executable"
+		    fi
+		    TC=$prog
+		    ;;
+	    esac
+	else
+	    TC='tc'
+	fi
+	#
+	# Compile by non-root needs no restore file
+	#
+	[ -n "$RESTOREFILE" ] || RESTOREFILE=restore
+
+	validate_restorefile RESTOREFILE
+
+	if [ "$2" = Yes ]; then
+	    case $STARTUP_ENABLED in
+		No|no|NO)
+		    not_configured_error "$g_product startup is disabled. To enable startup, set STARTUP_ENABLED=Yes in ${g_confdir}/${g_program}.conf"
+		    ;;
+		Yes|yes|YES)
+		    ;;
+		*)
+		    if [ -n "$STARTUP_ENABLED" ]; then
+			not_configured_error "Invalid Value for STARTUP_ENABLED: $STARTUP_ENABLED"
+		    fi
+		    ;;
+	    esac
+	fi
+
+	case ${SHOREWALL_COMPILER:=perl} in
+	    perl|Perl)
+		;;
+	    shell|Shell)
+		echo "   WARNING: SHOREWALL_COMPILER=shell ignored. Shorewall-shell support has been removed in this release" >&2
+		;;
+	    *)
+		fatal_error "Invalid value ($SHOREWALL_COMPILER) for SHOREWALL_COMPILER"
+		;;
+	esac
+
+	case ${TC_ENABLED:=Internal} in
+	    No|NO|no)
+	        TC_ENABLED=
+		;;
+	esac
+
+	[ -z "$LOGFORMAT" ] && LOGFORMAT='Shorewall:%s.%s'
+
+	[ -n "$LOGFORMAT" ] && LOGFORMAT="${LOGFORMAT%%%*}"
+
+	if [ -n "$STARTUP_LOG" ]; then
+	    if [ -n "$LOG_VERBOSITY" ]; then
+		case $LOG_VERBOSITY in
+		    -1)
+			;;
+		    0|1|2)
+			;;
+		    *)
+		        fatal_error "Invalid LOG_VERBOSITY ($LOG_VERBOSITY)"
+			;;
+		esac
+	    else
+		LOG_VERBOSITY=2;
+	    fi
+	else
+	    LOG_VERBOSITY=-1;
+	fi
+
+    else
+	STARTUP_LOG=
+	LOG_VERBOSITY=-1
+    fi
+
+    if [ -n "$SHOREWALL_SHELL" -a -z "$g_export" ]; then
+	if [ ! -x "$SHOREWALL_SHELL" ]; then
+	    echo "   WARNING: The program specified in SHOREWALL_SHELL does not exist or is not executable; falling back to /bin/sh" >&2
+	    SHOREWALL_SHELL=/bin/sh
+	fi
+    fi
+
+    if [ -n "$IP" ]; then
+	case "$IP" in
+	    */*)
+		if [ ! -x "$IP" ] ; then
+		    fatal_error "The program specified in IP ($IP) does not exist or is not executable"
+		fi
+		;;
+	    *)
+		prog="$(mywhich $IP 2> /dev/null)"
+		if [ -z "$prog" ] ; then
+		    fatal_error "Can't find $IP executable"
+		fi
+		IP=$prog
+		;;
+	esac
+    else
+	IP='ip'
+    fi
+
+    case $VERBOSITY in
+	-1|0|1|2)
+	    ;;
+	*)
+	    if [ -n "$VERBOSITY" ]; then
+		fatal_error "Invalid VERBOSITY setting ($VERBOSITY)"
+	    else
+		VERBOSITY=2
+	    fi
+	    ;;
+    esac
+
+    [ -n "$g_use_verbosity" ] && VERBOSITY=$g_use_verbosity || VERBOSITY=$(($g_verbose_offset + $VERBOSITY))
+
+    if [ $VERBOSITY -lt -1 ]; then
+	VERBOSITY=-1
+    elif [ $VERBOSITY -gt 2 ]; then
+	VERBOSITY=2
+    fi
+
+    g_hostname=$(hostname 2> /dev/null)
+
+    [ -n "$RSH_COMMAND" ] || RSH_COMMAND='ssh ${root}@${system} ${command}'
+    [ -n "$RCP_COMMAND" ] || RCP_COMMAND='scp ${files} ${root}@${system}:${destination}'
+
+    case $MANGLE_ENABLED in
+	Yes|yes)
+	    ;;
+	No|no)
+	    MANGLE_ENABLED=
+	    ;;
+	*)
+	    if [ -n "$MANGLE_ENABLED" ]; then
+		fatal_error "Invalid MANGLE_ENABLED setting ($MANGLE_ENABLED)"
+	    fi
+	    ;;
+    esac
+
+    case $AUTOMAKE in
+	Yes|yes)
+	    ;;
+	No|no)
+	    AUTOMAKE=
+	    ;;
+	*)
+	    if [ -n "$AUTOMAKE" ]; then
+		fatal_error "Invalid AUTOMAKE setting ($AUTOMAKE)"
+	    fi
+	    ;;
+    esac
+
+    case $LOAD_HELPERS_ONLY in
+	Yes|yes)
+	    ;;
+	No|no)
+	    LOAD_HELPERS_ONLY=
+	    ;;
+	*)
+	    if [ -n "$LOAD_HELPERS_ONLY" ]; then
+		fatal_error "Invalid LOAD_HELPERS_ONLY setting ($LOAD_HELPERS_ONLY)"
+	    fi
+	    ;;
+    esac
+
+    if [ -n "$WORKAROUNDS" ]; then
+	case $WORKAROUNDS in
+	    [Yy]es)
+	        ;;
+	    [Nn]o)
+		WORKAROUNDS=''
+		;;
+	    *)
+		fatal_error "Invalid setting ($WORKAROUNDS) for WORKAROUNDS"
+		;;
+	esac
+    fi
+
+    g_loopback=$(find_loopback_interfaces)
+
+    lib=$(find_file lib.cli-user)
+
+    [ -f $lib ] && . $lib
+}
+
+#
+# Determine if there are config files newer than the passed object
+#
+uptodate() {
+    [ -x $1 ] || return 1
+
+    local dir
+    local ifs
+
+    ifs="$IFS"
+    IFS=':'
+
+    for dir in $g_shorewalldir $CONFIG_PATH; do
+	if [ -n "$(find ${dir} -newer $1)" ]; then
+	    IFS="$ifs"
+	    return 1;
+	fi
+    done
+
+    IFS="$ifs"
+
+    return 0
+}
+
+#
+# Run the postcompile user exit
+#
+run_postcompile() { # $1 is the compiled script
+    local script
+
+    script=$(find_file postcompile)
+
+    if [ -f $script ]; then
+	. $script $1
+    else
+	return 0
+    fi
+}
+
+#
+# Run the compiler
+#
+compiler() {
+    local pc
+    local shorewallrc
+    local shorewallrc1
+    local options
+
+    pc=${LIBEXECDIR}/shorewall/compiler.pl
+
+    if [ $(id -u) -ne 0 ]; then
+	if [ -z "$g_shorewalldir" -o "$g_shorewalldir" = $CONFDIR/$g_program ]; then
+	    startup_error "Ordinary users may not $COMMAND the $CONFDIR/$g_program configuration"
+	fi
+    fi
+    #
+    # We've now set g_shorewalldir so recalculate CONFIG_PATH
+    #
+    [ -n "$g_haveconfig" ] || ensure_config_path
+    #
+    # Get the config from $g_shorewalldir
+    #
+    get_config Yes
+
+    case $COMMAND in
+	*start|try|refresh)
+	    ;;
+	*)
+	    STARTUP_LOG=
+	    LOG_VERBOSITY=-1
+	    ;;
+    esac
+
+    debugflags="-w"
+    [ -n "$g_debug" ]   && debugflags='-wd'
+    [ -n "$g_profile" ] && debugflags='-wd:NYTProf'
+
+    # Perl compiler only takes the output file as a argument
+
+    [ "$1" = debug -o "$1" = trace ] && shift;
+    [ "$1" = nolock ] && shift;
+    shift
+
+    shorewallrc=${g_basedir}/shorewallrc
+
+    if [ -n "$g_export" ]; then
+	shorewallrc1=$(find_file shorewallrc)
+	[ -f "$shorewallrc1" ] || fatal_error "Compiling for export requires a shorewallrc file"
+    fi
+
+    if [ -n "$g_conditional" ] && uptodate "$g_file"; then
+	echo "$g_file is up to date -- no compilation required"
+	g_compiled="$g_file"
+	return 0
+    fi
+
+    options="--verbose=$VERBOSITY --family=$g_family --config_path=$CONFIG_PATH --shorewallrc=${shorewallrc}"
+    [ -n "$shorewallrc1" ] && options="$options --shorewallrc1=${shorewallrc1}"
+    [ -n "$STARTUP_LOG" ] && options="$options --log=$STARTUP_LOG"
+    [ -n "$LOG_VERBOSITY" ] && options="$options --log_verbosity=$LOG_VERBOSITY";
+    [ -n "$g_export" ] && options="$options --export"
+    [ -n "$g_shorewalldir" ] && options="$options --directory=$g_shorewalldir"
+    [ -n "$g_timestamp" ] && options="$options --timestamp"
+    [ -n "$g_test" ] && options="$options --test"
+    [ -n "$g_preview" ] && options="$options --preview"
+    [ "$g_debugging" = trace ] && options="$options --debug"
+    [ -n "$g_refreshchains" ] && options="$options --refresh=$g_refreshchains"
+    [ -n "$g_confess" ] && options="$options --confess"
+    [ -n "$g_update" ] && options="$options --update"
+    [ -n "$g_annotate" ] && options="$options --annotate"
+    [ -n "$g_inline" ] && options="$options --inline"
+
+    if [ -n "$PERL" ]; then
+	if [ ! -x "$PERL" ]; then
+	    echo "   WARNING: The program specified in the PERL option does not exist or is not executable; falling back to /usr/bin/perl" >&2
+	    PERL=/usr/bin/perl
+	fi
+    else
+	PERL=/usr/bin/perl
+    fi
+
+    case "$g_doing" in
+	Compiling|Checking)
+	    progress_message3 "$g_doing using $g_product $SHOREWALL_VERSION..."
+	    ;;
+	Updating)
+	    progress_message3 "Updating $g_product configuration to $SHOREWALL_VERSION..."
+	    ;;
+	*)
+	    [ -n "$g_doing" ] && progress_message3 "$g_doing using $g_product $SHOREWALL_VERSION..."
+	    ;;
+    esac
+
+    if [ ${PERLLIBDIR} = ${LIBEXECDIR}/shorewall ]; then
+	$PERL $debugflags $pc $options $@
+    else
+	PERL5LIB=${PERLLIBDIR} $PERL $debugflags $pc $options $@
+    fi
+
+    status=$?
+
+    if [ $status -eq 0 -a $COMMAND != check -a $COMMAND != update ]; then
+	g_compiled="$g_file"
+	run_postcompile "$g_compiled"
+	return
+    fi
+
+    return $status
+}
+
+#
+# Start Command Executor
+#
+start_command() {
+    local finished
+    finished=0
+    local object
+    local rc
+    rc=0
+
+    do_it() {
+	if [ -n "$AUTOMAKE" ]; then
+	    [ -n "$nolock" ] || mutex_on
+	    run_it ${VARDIR}/firewall $g_debugging start
+	    rc=$?
+	    [ -n "$nolock" ] || mutex_off
+	else
+	    g_file="${VARDIR}/.start"
+	    if compiler $g_debugging $nolock compile "$g_file"; then
+		[ -n "$nolock" ] || mutex_on
+		run_it ${VARDIR}/.start $g_debugging start
+		rc=$?
+		[ -n "$nolock" ] || mutex_off
+	    else
+		rc=$?
+		logger -p kern.err "ERROR:$g_product start failed"
+	    fi
+	fi
+
+	exit $rc
+    }
+
+    if product_is_started; then
+	error_message "Shorewall is already running"
+	exit 0
+    fi
+
+    [ -n "$STARTUP_ENABLED" ] || not_configured_error "Startup is disabled"
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			d*)
+			    g_debug=Yes
+			    option=${option#d}
+			    ;;
+			f*)
+			    g_fast=Yes
+			    option=${option#f}
+			    ;;
+			p*)
+			    [ -n "$(which conntrack)" ] || fatal_error "The '-p' option requires the conntrack utility which does not appear to be installed on this system"
+			    g_purge=Yes
+			    option=${option%p}
+			    ;;
+			c*)
+			    AUTOMAKE=
+			    option=${option#c}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			C*)
+			    g_counters=Yes
+			    option=${option#C}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    ;;
+	1)
+	    [ -n "$g_shorewalldir" -o -n "$g_fast" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    AUTOMAKE=
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    if [ -n "${g_fast}${AUTOMAKE}" ]; then
+	if ! uptodate ${VARDIR}/$object; then
+	    g_fast=
+	    AUTOMAKE=
+	fi
+    fi
+
+    do_it
+}
+
+#
+# Compile Command Executor
+#
+compile_command() {
+    local finished
+    finished=0
+
+    while [ $finished -eq 0 ]; do
+	[ $# -eq 0 ] && break
+	option=$1
+	case $option in
+	    -*)
+		shift
+		option=${option#-}
+
+		[ -z "$option" ] && usage 1
+
+		while [ -n "$option" ]; do
+		    case $option in
+			e*)
+			    g_export=Yes
+			    g_shorewalldir='.'
+			    option=${option#e}
+			    ;;
+			p*)
+			    g_profile=Yes
+			    option=${option#p}
+			    ;;
+			t*)
+			    g_test=Yes
+			    option=${option#t}
+			    ;;
+			d*)
+			    g_debug=Yes;
+			    option=${option#d}
+			    ;;
+			c*)
+			    g_conditional=Yes;
+			    option=${option#c}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			-)
+			    finished=1
+			    option=
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    g_file=
+
+    case $# in
+	0)
+	    [ -n "$g_export" ] && g_file=firewall || g_file=${VARDIR}/firewall
+	    ;;
+	1)
+	    g_file=$1
+	    [ -d "$g_file" ] && fatal_error "$g_file is a directory"
+	    ;;
+	2)
+	    [ -n "$g_shorewalldir" -a -z "$g_export" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    g_file=$2
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    [ "x$g_file" = x- ] && g_doing=''
+
+    compiler $g_debugging compile "$g_file"
+}
+
+#
+# Check Command Executor
+#
+check_command() {
+    local finished
+    finished=0
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			e*)
+			    g_export=Yes
+			    g_shorewalldir='.'
+			    option=${option#e}
+			    ;;
+			p*)
+			    g_profile=Yes
+			    option=${option#p}
+			    ;;
+			d*)
+			    g_debug=Yes;
+			    option=${option#d}
+			    ;;
+			r*)
+			    g_preview=Yes
+			    option=${option#r}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    ;;
+	1)
+	    [ -n "$g_shorewalldir" -a -z "$g_export" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    g_doing="Checking"
+
+    compiler $g_debugging $nolock check
+}
+
+#
+# Update Command Executor
+#
+update_command() {
+    local finished
+    finished=0
+
+    g_update=Yes
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			e*)
+			    g_export=Yes
+			    option=${option#e}
+			    ;;
+			p*)
+			    g_profile=Yes
+			    option=${option#p}
+			    ;;
+			d*)
+			    g_debug=Yes;
+			    option=${option#d}
+			    ;;
+			r*)
+			    g_preview=Yes
+			    option=${option#r}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			a*)
+			    g_annotate=Yes
+			    option=${option#a}
+			    ;;
+			A*)
+			    g_inline=Yes
+			    option=${option#A}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    ;;
+	1)
+	    [ -n "$g_shorewalldir" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    g_doing="Updating"
+
+    compiler $g_debugging $nolock check
+}
+
+#
+# Reload/Restart Command Executor
+#
+restart_command() {
+    local finished
+    finished=0
+    local rc
+    rc=0
+    local restorefile
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			d*)
+			    g_debug=Yes
+			    option=${option#d}
+			    ;;
+			f*)
+			    g_fast=Yes
+			    option=${option#f}
+			    ;;
+			c*)
+			    AUTOMAKE=
+			    option=${option#c}
+			    ;;
+			n*)
+			    g_noroutes=Yes
+			    option=${option#n}
+			    ;;
+			p*)
+			    [ -n "$(which conntrack)" ] || fatal_error "The '-p' option requires the conntrack utility which does not appear to be installed on this system"
+			    g_purge=Yes
+			    option=${option%p}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			C*)
+			    g_counters=Yes
+			    option=${option#C}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    ;;
+	1)
+	    [ -n "$g_shorewalldir" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    [ -n "$g_fast" ] && fatal_error "Directory may not be specified with the -f option"
+	    AUTOMAKE=
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    [ -n "$STARTUP_ENABLED" ] || not_configured_error "Startup is disabled"
+
+    if [ -z "$g_fast" -a -n "$AUTOMAKE" ]; then
+	uptodate ${VARDIR}/firewall && g_fast=Yes
+    fi
+
+    g_file="${VARDIR}/.${COMMAND}"
+
+    if [ -z "$g_fast" ]; then
+	if compiler $g_debugging $nolock compile "$g_file"; then
+	    [ -n "$nolock" ] || mutex_on
+	    run_it ${VARDIR}/.${COMMAND} $g_debugging ${COMMAND}
+	    rc=$?
+	    [ -n "$nolock" ] || mutex_off
+	else
+	    rc=$?
+	    logger -p kern.err "ERROR:$g_product ${COMMAND} failed"
+	fi
+    else
+	[ -x ${VARDIR}/firewall ] || fatal_error "No ${VARDIR}/firewall file found"
+	[ -n "$nolock" ] || mutex_on
+	run_it ${VARDIR}/firewall $g_debugging $COMMAND
+	rc=$?
+	[ -n "$nolock" ] || mutex_off
+    fi
+
+    return $rc
+}
+
+#
+# Refresh Command Executor
+#
+refresh_command() {
+    local finished
+    finished=0
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			d*)
+			    g_debug=Yes
+			    option=${option#d}
+			    ;;
+			n*)
+			    g_noroutes=Yes
+			    option=${option#n}
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			D)
+			    if [ $# -gt 1 ]; then
+				g_shorewalldir="$2"
+				option=
+				shift
+			    else
+				fatal_error "The -D option requires a directory name"
+			    fi
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    if [ $# -gt 0 ]; then
+	g_refreshchains=$1
+	shift
+
+	while [ $# -gt 0 ]; do
+	    g_refreshchains="$g_refreshchains,$1"
+	    shift
+	done
+    else
+	g_refreshchains=:refresh:
+    fi
+
+    product_is_started || fatal_error "$g_product is not running"
+
+    [ -n "$STARTUP_ENABLED" ] || not_configured_error "Startup is disabled"
+
+    g_file="${VARDIR}/.refresh"
+
+    if compiler $g_debugging $nolock compile "$g_file"; then
+	[ -n "$nolock" ] || mutex_on
+	run_it ${VARDIR}/.refresh $g_debugging refresh
+	rc=$?
+	[ -n "$nolock" ] || mutex_off
+    else
+	rc=$?
+    fi
+
+    return $rc
+}
+
+#
+# Safe-start/safe-reload/safe-restart Command Executor
+#
+safe_commands() {
+    local finished
+    finished=0
+    local command
+    local timeout
+    timeout=60
+
+    # test is the shell supports timed read
+    read -t 0 junk 2> /dev/null
+    if [ $? -eq 2 -a ! -x /bin/bash ];then
+	echo "Your shell does not support a feature required to execute this command".
+	exit 2
+    fi
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			n*)
+			    g_noroutes=Yes
+			    option=${option#n}
+			    ;;
+			t)
+			    [ $# -eq 1 ] && fatal_error "The -t option requires a timeout value"
+			    echo $2 | egrep -q '[[:digit:]]+[smh]' || fatal_error "The timeout value must be numeric, optionally followed by a suffix (s, m or h)"
+			    timeout=$2
+			    option=
+			    shift;
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    ;;
+	1)
+	    [ -n "$g_shorewalldir" ] && usage 2
+
+	    if [ ! -d $1 ]; then
+		if [ -e $1 ]; then
+		    fatal_error "$1 is not a directory"
+		else
+		    fatal_error "Directory $1 does not exist"
+		fi
+	    fi
+
+	    g_shorewalldir=$(resolve_file $1)
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    [ -n "$STARTUP_ENABLED" ] || not_configured_error "Startup is disabled"
+
+    if product_is_started; then
+	running=Yes
+    else
+	running=
+    fi
+
+    if [ "$COMMAND" = "safe-start" -a  -n "$running" ]; then
+	# the command is safe-start but the firewall is already running
+	error_message "Shorewall is already started"
+	exit 0
+    fi
+
+    if [ "$COMMAND" = "safe-start" -o -z "$running" ]; then
+	# the command is safe-start or shorewall[6] is not started yet
+	command="start"
+    else
+	# the command is safe-reload or safe-restart and the firewall is already running
+	command="${COMMAND#safe-}"
+    fi
+
+    g_file="${VARDIR}/.$command"
+
+    if ! compiler $g_debugging nolock compile "$g_file"; then
+	status=$?
+	exit $status
+    fi
+
+    case $command in
+	start)
+	    RESTOREFILE=NONE
+	    progress_message3 "Starting..."
+	    ;;
+	reload)
+	    RESTOREFILE=.safe
+	    g_restorepath=${VARDIR}/.safe
+	    save_config
+	    progress_message3 "Reloading..."
+	    ;;
+	restart)
+	    RESTOREFILE=.safe
+	    g_restorepath=${VARDIR}/.safe
+	    save_config
+	    progress_message3 "Restarting..."
+	    ;;
+    esac
+
+    [ -n "$nolock" ] || mutex_on
+
+    if run_it ${VARDIR}/.$command $g_debugging $command; then
+
+	echo -n "Do you want to accept the new firewall configuration? [y/n] "
+
+	if read_yesno_with_timeout $timeout ; then
+	    echo "New configuration has been accepted"
+	else
+	    if [ "$command" = "restart" -o "$command" = "reload" ]; then
+		run_it ${VARDIR}/.safe restore
+	    else
+		run_it ${VARDIR}/.$command clear
+	    fi
+
+	    [ -n "$nolock" ] || mutex_off
+
+	    echo "New configuration has been rejected and the old one restored"
+	    exit 2
+	fi
+
+    fi
+
+    [ -n "$nolock" ] || mutex_off
+}
+
+#
+# 'try' Command Executor
+#
+try_command() {
+    local finished
+    finished=0
+    local timeout
+    timeout=
+
+    handle_directory() {
+	[ -n "$g_shorewalldir" ] && usage 2
+
+	if [ ! -d $1 ]; then
+	    if [ -e $1 ]; then
+		fatal_error "$1 is not a directory"
+	    else
+		fatal_error "Directory $1 does not exist"
+	    fi
+	fi
+
+	g_shorewalldir=$(resolve_file $1)
+    }
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			n*)
+			    g_noroutes=Yes
+			    option=${option#n}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	0)
+	    usage 1
+	    ;;
+	1)
+	    handle_directory $1
+	    ;;
+	2)
+	    handle_directory $1
+	    echo $2 | egrep -q '[[:digit:]]+[smh]' || fatal_error "The timeout value must be numeric, optionally followed by a suffix (s, m or h)"
+	    timeout=$2
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    [ -n "$STARTUP_ENABLED" ] || not_configured_error "Startup is disabled"
+
+    if product_is_started; then
+	running=Yes
+    else
+	running=
+    fi
+
+    if [ -z "$running" ]; then
+	# shorewall[6] is not started yet
+	command="start"
+    else
+	# the firewall is already running
+	command="reload"
+    fi
+
+    g_file="${VARDIR}/.$command"
+
+    if ! compiler $g_debugging $nolock compile "$g_file"; then
+	status=$?
+	exit $status
+    fi
+
+    run_postcompile ${VARDIR}/.restart
+
+    case $command in
+	start)
+	    RESTOREFILE=NONE
+	    progress_message3 "Starting..."
+	    ;;
+	reload)
+	    RESTOREFILE=.try
+	    g_restorepath=${VARDIR}/.try
+	    save_config
+	    progress_message3 "Reloading..."
+	    ;;
+    esac
+
+    [ -n "$nolock" ] || mutex_on
+
+    if run_it ${VARDIR}/.$command $g_debugging $command && [ -n "$timeout" ]; then
+	sleep $timeout
+
+	if [ "$command" = "reload" ]; then
+	    run_it ${VARDIR}/.try restore
+	else
+	    run_it ${VARDIR}/.$command clear
+	fi
+    fi
+
+    [ -n "$nolock" ] || mutex_off
+
+    return 0
+}
+
+rsh_command() {
+    command="$*"
+
+    eval $RSH_COMMAND
+}
+
+rcp_command() {
+    files="$1"
+    destination=$2
+
+    eval $RCP_COMMAND
+}
+
+#
+# Remote-{start|reload|restart} command executor
+#
+remote_reload_command() # $* = original arguments less the command.
+{
+    local verbose
+    verbose=$(make_verbose)
+    local file
+    file=
+    local capabilities
+    capabilities=
+    local finished
+    finished=0
+    local saveit
+    saveit=
+    local result
+    local system
+    local getcaps
+    getcaps=
+    local root
+    root=root
+    local libexec
+    libexec=${LIBEXECDIR}
+    local confdir
+    confdir=${CONFDIR}
+    local sbindir
+    sbindir=${SBINDIR}
+    local sharedir
+    sharedir=${SHAREDIR}
+    local litedir
+    local exitstatus
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			s*)
+			    saveit=Yes
+			    option=${option#s}
+			    ;;
+			c*)
+			    getcaps=Yes
+			    option=${option#c}
+			    ;;
+			r)
+			    [ $# -gt 1 ] || fatal_error "Missing Root User name"
+			    root=$2
+			    option=
+			    shift
+			    ;;
+			T*)
+			    g_confess=Yes
+			    option=${option#T}
+			    ;;
+			i*)
+			    g_inline=Yes
+			    option=${option#i}
+			    ;;
+			*)
+			    usage 1
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	1)
+	    g_shorewalldir="."
+	    system=$1
+	    ;;
+	2)
+	    g_shorewalldir=$1
+	    system=$2
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+    if [ -f $g_shorewalldir/shorewallrc ]; then
+	. $g_shorewalldir/shorewallrc
+	sbindir="$SBINDIR"
+	confdir="$CONFDIR"
+	libexec="$LIBEXECDIR"
+	. $sharedir/shorewall/shorewallrc
+    else
+	error_message "   WARNING: $g_shorewalldir/shorewallrc does not exist; using settings from $SHAREDIR/shorewall" >&2
+    fi
+
+    if [ -f $g_shorewalldir/${g_program}.conf ]; then
+	if [ -f $g_shorewalldir/params ]; then
+	    . $g_shorewalldir/params
+	fi
+
+	ensure_config_path
+
+	get_config No
+
+	g_haveconfig=Yes
+    else
+	fatal_error "$g_shorewalldir/$g_program.conf does not exist"
+    fi
+
+    if [ -z "$getcaps" ]; then
+	capabilities=$(find_file capabilities)
+	[ -f $capabilities ] || getcaps=Yes
+    fi
+
+    if [ -n "$getcaps" ]; then
+	[ -n "$DONT_LOAD" ] && DONT_LOAD="$(echo $DONT_LOAD | tr ',' ' ')"
+
+	progress_message "Getting Capabilities on system $system..."
+	if [ $g_family -eq 4 ]; then
+	    if ! rsh_command "MODULESDIR=$MODULESDIR MODULE_SUFFIX=\"$MODULE_SUFFIX\" IPTABLES=$IPTABLES DONT_LOAD=\"$DONT_LOAD\" $libexec/shorewall-lite/shorecap" > $g_shorewalldir/capabilities; then
+	        fatal_error "Capturing capabilities on system $system failed"
+	    fi
+	elif ! rsh_command "MODULESDIR=$MODULESDIR MODULE_SUFFIX=\"$MODULE_SUFFIX\" IP6TABLES=$IP6TABLES DONT_LOAD=\"$DONT_LOAD\" $libexec/shorewall6-lite/shorecap" > $g_shorewalldir/capabilities; then
+	    fatal_error "Capturing capabilities on system $system failed"
+	fi
+    fi
+
+    file=$(resolve_file $g_shorewalldir/firewall)
+
+    g_export=Yes
+
+    temp=$(rsh_command ${g_program}-lite show config 2> /dev/null | grep ^LITEDIR | sed 's/LITEDIR is //')
+
+    [ -n "$temp" ] && litedir="$temp"
+
+    [ -n "$litedir" ] || litedir=${VARLIB}/${g_program}-lite
+
+    g_file="$g_shorewalldir/firewall"
+
+    exitstatus=0
+
+    if compiler $g_debugging compiler "$g_file"; then
+	progress_message3 "Copying $file and ${file}.conf to ${system}:${litedir}..."
+	if rcp_command "$g_shorewalldir/firewall $g_shorewalldir/firewall.conf" ${litedir};  then
+	    save=$(find_file save);
+
+	    if [ -f $save ]; then
+		progress_message3 "Copying $save to ${system}:${confdir}/${g_program}-lite/"
+		rcp_command $save ${confdir}/shorewall-lite/
+		exitstatus=$?
+	    fi
+
+	    if [ $exitstatus -eq 0 ]; then
+
+		progress_message3 "Copy complete"
+
+		if [ $COMMAND = remote-reload ]; then
+		    if rsh_command "${sbindir}/${g_program}-lite $g_debugging $verbose $timestamp reload"; then
+			progress_message3 "System $system reloaded"
+		    else
+			exitstatus=$?
+			savit=
+		    fi
+		elif [ $COMMAND = remote-restart ]; then
+		    if rsh_command "${sbindir}/${g_program}-lite $g_debugging $verbose $timestamp restart"; then
+			progress_message3 "System $system restarted"
+		    else
+			exitstatus=$?
+			saveit=
+		    fi
+		elif rsh_command "${sbindir}/${g_program}-lite $g_debugging $verbose $timestamp start"; then
+		    progress_message3 "System $system started"
+		else
+		    exitstatus=$?
+		    saveit=
+		fi
+
+		if [ -n "$saveit" ]; then
+		    if rsh_command "${sbindir}/${g_program}-lite $g_debugging $verbose $timestamp save"; then
+			progress_message3 "Configuration on system $system saved"
+		    else
+			exitstatus=$?
+		    fi
+		fi
+	    fi
+	else
+	    exitstatus=$?
+	fi
+    else
+	exitstatus=$?
+    fi
+
+    return $exitstatus
+}
+
+#
+# Export command executor
+#
+export_command() # $* = original arguments less the command.
+{
+    local verbose
+    verbose=$(make_verbose)
+    local file
+    file=
+    local finished
+    finished=0
+    local target
+
+    while [ $finished -eq 0 -a $# -gt 0 ]; do
+	option=$1
+	case $option in
+	    -*)
+		option=${option#-}
+
+		while [ -n "$option" ]; do
+		    case $option in
+			-)
+			    finished=1
+			    option=
+			    ;;
+			*)
+			    fatal_error "Unrecognized option \"$option\""
+			    ;;
+		    esac
+		done
+		shift
+		;;
+	    *)
+		finished=1
+		;;
+	esac
+    done
+
+    case $# in
+	1)
+	    g_shorewalldir="."
+	    target=$1
+	    ;;
+	2)
+	    g_shorewalldir=$1
+	    target=$2
+	    ;;
+	*)
+	    fatal_error "Invalid command syntax (\"man $g_program\" for help)"
+	    ;;
+    esac
+
+    case $target in
+	*:*)
+	    ;;
+	*)
+	    target=$target:
+	    ;;
+    esac
+
+    file=$(resolve_file $g_shorewalldir/firewall)
+
+    g_export=Yes
+
+    g_file="$g_shorewalldir/firewall"
+
+    if compiler $g_debugging compile "$g_file" && \
+	echo "Copying $file and ${file}.conf to ${target#*@}..." && \
+	scp $g_shorewalldir/firewall $g_shorewalldir/firewall.conf $target
+    then
+	save=$(find_file save);
+
+	[ -f $save ] && progress_message3 "Copying $save to ${target#*}..." && rcp_command $save $target
+
+	progress_message3 "Copy complete"
+    fi
+}
+
+run_command() {
+    if [ -x ${VARDIR}/firewall ] ; then
+	uptodate ${VARDIR}/firewall || echo "   WARNING: ${VARDIR}/firewall is not up to date" >&2
+	run_it ${VARDIR}/firewall $g_debugging $@
+    else
+	fatal_error "${VARDIR}/firewall does not exist or is not executable"
+    fi
+}
+
+compiler_command() {
+
+    case $COMMAND in
+	compile|co)
+	    shift
+	    compile_command $@
+	    ;;
+	refresh)
+	    get_config Yes Yes
+	    shift
+	    refresh_command $@
+	    ;;
+	check|ck)
+	    shift
+	    check_command $@
+	    ;;
+	update)
+	    shift
+	    update_command $@
+	    ;;
+	remote-start|remote-reload|remote-restart)
+	    shift
+	    remote_reload_command $@
+	    ;;
+	export)
+	    shift
+	    export_command $@
+	    ;;
+	try)
+	    get_config Yes
+	    shift
+	    try_command $@
+	    ;;
+	safe-reload|safe-restart|safe-start)
+	    get_config Yes
+	    shift
+	    safe_commands $@
+	    ;;
+	*)
+	    usage 1
+	    ;;
+    esac
+
+}

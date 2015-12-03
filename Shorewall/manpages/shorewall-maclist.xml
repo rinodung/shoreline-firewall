@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.4//EN"
+"http://www.oasis-open.org/docbook/xml/4.4/docbookx.dtd">
+<refentry>
+  <refmeta>
+    <refentrytitle>shorewall-maclist</refentrytitle>
+
+    <manvolnum>5</manvolnum>
+
+    <refmiscinfo>Configuration Files</refmiscinfo>
+  </refmeta>
+
+  <refnamediv>
+    <refname>maclist</refname>
+
+    <refpurpose>Shorewall MAC Verification file</refpurpose>
+  </refnamediv>
+
+  <refsynopsisdiv>
+    <cmdsynopsis>
+      <command>/etc/shorewall/maclist</command>
+    </cmdsynopsis>
+  </refsynopsisdiv>
+
+  <refsect1>
+    <title>Description</title>
+
+    <para>This file is used to define the MAC addresses and optionally their
+    associated IP addresses to be allowed to use the specified interface. The
+    feature is enabled by using the <emphasis role="bold">maclist</emphasis>
+    option in the <ulink
+    url="/manpages/shorewall-interfaces.html">shorewall-interfaces</ulink>(5)
+    or <ulink url="/manpages/shorewall-hosts.html">shorewall-hosts</ulink>(5)
+    configuration file.</para>
+
+    <para>The columns in the file are as follows (where the column name is
+    followed by a different name in parentheses, the different name is used in
+    the alternate specification syntax).</para>
+
+    <variablelist>
+      <varlistentry>
+        <term><emphasis role="bold">DISPOSITION</emphasis> - {<emphasis
+        role="bold">ACCEPT</emphasis>|<emphasis
+        role="bold">DROP</emphasis>|<emphasis
+        role="bold">REJECT</emphasis>}[<option>:</option><replaceable>log-level</replaceable>]</term>
+
+        <listitem>
+          <para><emphasis role="bold">ACCEPT</emphasis> or <emphasis
+          role="bold">DROP</emphasis> (if MACLIST_TABLE=filter in <ulink
+          url="/manpages/shorewall.conf.html">shorewall.conf</ulink>(5), then
+          REJECT is also allowed). If specified, the
+          <replaceable>log-level</replaceable> causes packets matching the
+          rule to be logged at that level.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><emphasis role="bold">INTERFACE</emphasis> -
+        <emphasis>interface</emphasis></term>
+
+        <listitem>
+          <para>Network <emphasis>interface</emphasis> to a host.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><emphasis role="bold">MAC</emphasis> -
+        <emphasis>address</emphasis></term>
+
+        <listitem>
+          <para>MAC <emphasis>address</emphasis> of the host -- you do not
+          need to use the Shorewall format for MAC addresses here. If
+          <emphasis role="bold">IP ADDRESSES</emphasis> is supplied then
+          <emphasis role="bold">MAC</emphasis> can be supplied as a dash
+          (<emphasis role="bold">-</emphasis>)</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><emphasis role="bold">IP ADDRESSES</emphasis> (addresses) -
+        [<emphasis>address</emphasis>[<emphasis
+        role="bold">,</emphasis><emphasis>address</emphasis>]...]</term>
+
+        <listitem>
+          <para>Optional - if specified, both the MAC and IP address must
+          match. This column can contain a comma-separated list of host and/or
+          subnet addresses. If your kernel and iptables have iprange match
+          support then IP address ranges are also allowed. Similarly, if your
+          kernel and iptables include ipset support than set names (prefixed
+          by "+") are also allowed.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>FILES</title>
+
+    <para>/etc/shorewall/maclist</para>
+  </refsect1>
+
+  <refsect1>
+    <title>See ALSO</title>
+
+    <para><ulink
+    url="/MAC_Validation.html">http://www.shorewall.net/MAC_Validation.html</ulink></para>
+
+    <para><ulink
+    url="/configuration_file_basics.htm#Pairs">http://www.shorewall.net/configuration_file_basics.htm#Pairs</ulink></para>
+
+    <para>shorewall(8), shorewall-accounting(5), shorewall-actions(5),
+    shorewall-blacklist(5), shorewall-hosts(5), shorewall_interfaces(5),
+    shorewall-ipsets(5), shorewall-masq(5), shorewall-nat(5),
+    shorewall-netmap(5), shorewall-params(5), shorewall-policy(5),
+    shorewall-providers(5), shorewall-proxyarp(5), shorewall-rtrules(5),
+    shorewall-routestopped(5), shorewall-rules(5), shorewall.conf(5),
+    shorewall-secmarks(5), shorewall-tcclasses(5), shorewall-tcdevices(5),
+    shorewall-mangle(5), shorewall-tos(5), shorewall-tunnels(5),
+    shorewall-zones(5)</para>
+  </refsect1>
+</refentry>

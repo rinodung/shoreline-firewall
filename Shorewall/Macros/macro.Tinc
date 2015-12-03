@@ -1,0 +1,12 @@
+#
+# Shorewall - tinc Macro
+#
+# /usr/share/shorewall/macro.Tinc Macro
+#
+#       This macro handles tinc traffic.
+#
+###############################################################################
+#ACTION SOURCE  DEST    PROTO   DEST    SOURCE  RATE    USER/
+#                               PORT(S) PORT(S) LIMIT   GROUP
+PARAM   -       -       udp     655
+PARAM   -       -       tcp     655
